@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#111111" />
+  <link rel="manifest" href="manifest.json" />
+  <title>Upper / Lower Tracker</title>
+  <style>
+    :root { --bg:#0b0b0c; --card:#151518; --text:#f3f3f4; --muted:#a9a9b2; --line:#24242a; --btn:#2a2a33; }
+    *{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial;}
+    body{margin:0;background:var(--bg);color:var(--text);padding:16px 16px 90px;}
+    header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;}
+    h1{font-size:18px;margin:0;}
+    .pill{font-size:12px;color:var(--muted);border:1px solid var(--line);padding:6px 10px;border-radius:999px;}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 10px;}
+    button{background:var(--btn);color:var(--text);border:1px solid var(--line);padding:10px 12px;border-radius:12px;font-size:14px;}
+    button.primary{background:#2f6fed;border-color:#2f6fed;}
+    button.danger{background:#7a1f2a;border-color:#7a1f2a;}
+    button:active{transform:scale(.98);}
+    .grid{display:grid;gap:12px;}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+    .title{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px;}
+    .exname{font-weight:600;}
+    .range{font-size:12px;color:var(--muted);}
+    .sets{display:grid;gap:8px;}
+    .setrow{display:grid;grid-template-columns:52px 1fr 1fr;gap:8px;align-items:center;}
+    .setrow.two{grid-template-columns:52px 1fr 1fr 1fr 1fr;}
+    label{font-size:12px;color:var(--muted);}
+    input{width:100%;padding:10px 10px;border-radius:12px;border:1px solid var(--line);background:#0f0f12;color:var(--text);font-size:14px;}
+    .small{font-size:12px;color:var(--muted);line-height:1.35;}
+    .footerbar{position:fixed;left:0;right:0;bottom:0;background:rgba(11,11,12,.92);backdrop-filter:blur(10px);
+      border-top:1px solid var(--line);padding:10px 12px;display:flex;gap:10px;justify-content:space-between;align-items:center;}
+    .footerbar .left{display:flex;gap:8px;flex-wrap:wrap;}
+    .hint{font-size:12px;color:var(--muted);}
+    .ok{color:#7CFF9B;}
+    .warn{color:#ffd56a;}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;}
+    details summary{cursor:pointer;color:var(--muted);margin-top:6px;}
+    textarea{width:100%;min-height:120px;background:#0f0f12;color:var(--text);border:1px solid var(--line);border-radius:12px;padding:10px;font-size:12px;}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Upper / Lower Tracker</h1>
+      <div class="hint">Planet Fitness • Left arm bias built-in</div>
+    </div>
+    <div class="pill" id="statusPill">Saved locally</div>
+  </header>
+
+  <div class="tabs" id="dayTabs"></div>
+
+  <div class="card">
+    <div class="small">
+      <b>Progression rules:</b>
+      Hit the <span class="mono">top of the rep range</span> on <b>all sets</b> → add weight next time.
+      Arms: <b>LEFT sets the limit</b> (right only matches reps/weight).
+    </div>
+  </div>
+
+  <div id="workout" class="grid" style="margin-top:12px;"></div>
+
+  <div class="footerbar">
+    <div class="left">
+      <button class="primary" id="saveBtn">Save</button>
+      <button id="clearDayBtn">Clear Day</button>
+      <button id="exportBtn">Export</button>
+      <button id="importBtn">Import</button>
+    </div>
+    <div class="hint" id="saveHint">Auto-saves too</div>
+  </div>
+
+  <dialog id="ioDialog">
+    <form method="dialog" class="card" style="max-width:720px;">
+      <div class="title">
+        <div class="exname" id="ioTitle">Export / Import</div>
+        <button>Close</button>
+      </div>
+      <div class="small" id="ioText"></div>
+      <div style="margin-top:10px;">
+        <textarea id="ioArea" spellcheck="false"></textarea>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button type="button" class="primary" id="copyBtn">Copy</button>
+        <button type="button" id="applyImportBtn">Apply Import</button>
+      </div>
+      <div class="small" style="margin-top:8px;color:var(--muted);">
+        Tip: Export is perfect for sending to yourself, saving in Notes, or backing up.
+      </div>
+    </form>
+  </dialog>
+
+<script>
+/** -------------------------------
+ *  Workout definition
+ *  ------------------------------*/
+const DAYS = [
+  {
+    id: "upper1",
+    name: "Upper Day 1",
+    note: "2 Chest • 2 Back • 1 Bi • 1 Tri",
+    exercises: [
+      ex("Machine Chest Press", "4 × 8–12", sets(4)),
+      ex("Incline DB Press", "3 × 10–12", sets(3)),
+      ex("Assisted Pull-Ups (assist lbs)", "4 × 6–10", sets(4)),
+      ex("Seated Cable Row (neutral)", "3 × 10–12", sets(3)),
+      exLR("Single-Arm DB Curl", "3–4 × 10–12 (LEFT first)", lrSets(3)),
+      exLR("Single-Arm Cable Triceps Pushdown", "3–4 × 10–12 (LEFT first)", lrSets(3)),
+    ]
+  },
+  {
+    id: "lower1",
+    name: "Lower Day 1",
+    note: "Quad bias",
+    exercises: [
+      ex("Smith Squat", "4 × 8–10", sets(4)),
+      ex("Leg Press", "3 × 12–15", sets(3)),
+      ex("Seated Leg Curl", "3 × 10–15", sets(3)),
+      ex("Leg Extension", "3 × 12–15", sets(3)),
+      ex("Standing Calf Raise", "4 × 12–20", sets(4)),
+    ]
+  },
+  {
+    id: "upper2",
+    name: "Upper Day 2",
+    note: "1 Chest • 1 Back • 2 Shoulders • 2 Bi • 2 Tri",
+    exercises: [
+      ex("Incline Chest Press Machine", "4 × 8–12", sets(4)),
+      exLR("Single-Arm Lat Pulldown", "3 × 10–12 (LEFT first)", lrSets(3)),
+      ex("Machine Shoulder Press", "3 × 8–12", sets(3)),
+      ex("DB Lateral Raise", "4 × 12–20", sets(4)),
+      exLR("Single-Arm Cable Curl", "3–4 × 10–12 (LEFT bias)", lrSets(3)),
+      ex("Incline DB Curl", "3 × 10–12", sets(3)),
+      exLR("Single-Arm Overhead Cable Triceps Extension", "3–4 × 10–12 (LEFT bias)", lrSets(3)),
+      ex("Rope Triceps Pushdown", "3 × 12–15", sets(3)),
+    ]
+  },
+  {
+    id: "lower2",
+    name: "Lower Day 2",
+    note: "Glutes / hamstrings",
+    exercises: [
+      ex("Smith RDL", "4 × 8–10", sets(4)),
+      ex("Smith Hip Thrust", "3 × 10–12", sets(3)),
+      exLR("Bulgarian Split Squat", "3 × 8–10/leg", lrSets(3, true)), // per-leg tracking
+      ex("Lying Leg Curl", "3 × 10–15", sets(3)),
+      ex("Seated Calf Raise", "4 × 15–25", sets(4)),
+    ]
+  },
+];
+
+function ex(name, repRange, setTemplate){
+  return { type:"standard", name, repRange, sets:setTemplate };
+}
+function exLR(name, repRange, setTemplate){
+  return { type:"lr", name, repRange, sets:setTemplate };
+}
+function sets(n){
+  return Array.from({length:n}, (_,i)=>({ set:i+1, weight:"", reps:"" }));
+}
+function lrSets(n, perLeg=false){
+  return Array.from({length:n}, (_,i)=>({
+    set:i+1,
+    left:{ weight:"", reps:"" },
+    right:{ weight:"", reps:"" },
+    perLeg
+  }));
+}
+
+/** -------------------------------
+ *  Storage
+ *  ------------------------------*/
+const KEY = "ul_tracker_v1";
+const state = load() || { activeDayId: DAYS[0].id, logs: {}, lastSavedAt: null };
+
+function load(){
+  try { return JSON.parse(localStorage.getItem(KEY)); } catch(e){ return null; }
+}
+function save(){
+  state.lastSavedAt = Date.now();
+  localStorage.setItem(KEY, JSON.stringify(state));
+  flashSaved();
+}
+let saveTimer = null;
+function autosaveSoon(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 350);
+}
+function flashSaved(){
+  const pill = document.getElementById("statusPill");
+  pill.textContent = "Saved ✓";
+  pill.classList.add("ok");
+  setTimeout(()=>{
+    pill.textContent = "Saved locally";
+    pill.classList.remove("ok");
+  }, 900);
+}
+
+/** -------------------------------
+ *  UI
+ *  ------------------------------*/
+const dayTabs = document.getElementById("dayTabs");
+const workoutEl = document.getElementById("workout");
+
+function renderTabs(){
+  dayTabs.innerHTML = "";
+  DAYS.forEach(d=>{
+    const btn = document.createElement("button");
+    btn.textContent = d.name;
+    if(d.id === state.activeDayId) btn.classList.add("primary");
+    btn.onclick = ()=>{ state.activeDayId = d.id; render(); autosaveSoon(); };
+    dayTabs.appendChild(btn);
+  });
+}
+
+function getDayLog(dayId){
+  if(!state.logs[dayId]) state.logs[dayId] = { date: todayISO(), exercises: {} };
+  return state.logs[dayId];
+}
+
+function todayISO(){
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth()+1).padStart(2,"0");
+  const d = String(now.getDate()).padStart(2,"0");
+  return `${y}-${m}-${d}`;
+}
+
+function render(){
+  renderTabs();
+  workoutEl.innerHTML = "";
+  const day = DAYS.find(d=>d.id===state.activeDayId);
+  const log = getDayLog(day.id);
+
+  // header card
+  const head = document.createElement("div");
+  head.className = "card";
+  head.innerHTML = `
+    <div class="title">
+      <div>
+        <div class="exname">${day.name}</div>
+        <div class="range">${day.note}</div>
+      </div>
+      <div class="pill">Date: ${log.date}</div>
+    </div>
+    <div class="small">
+      <b>Arm bias:</b> Start LEFT on all single-arm moves. Right only matches LEFT.
+      LEFT gets +1 set or slower negatives (3–4 sec).
+    </div>
+  `;
+  workoutEl.appendChild(head);
+
+  day.exercises.forEach((exercise, idx)=>{
+    const card = document.createElement("div");
+    card.className = "card";
+
+    const exKey = `${idx}_${exercise.name}`;
+    if(!log.exercises[exKey]){
+      // initialize from template
+      log.exercises[exKey] = JSON.parse(JSON.stringify(exercise.sets));
+    }
+
+    const setsData = log.exercises[exKey];
+
+    const top = document.createElement("div");
+    top.className = "title";
+    top.innerHTML = `
+      <div>
+        <div class="exname">${exercise.name}</div>
+        <div class="range">${exercise.repRange}</div>
+      </div>
+      <div class="small" id="hint_${exKey}"></div>
+    `;
+    card.appendChild(top);
+
+    const setsWrap = document.createElement("div");
+    setsWrap.className = "sets";
+
+    if(exercise.type === "standard"){
+      setsData.forEach((s,i)=>{
+        const row = document.createElement("div");
+        row.className = "setrow";
+        row.innerHTML = `
+          <label>Set ${i+1}</label>
+          <input inputmode="decimal" placeholder="Weight" value="${esc(s.weight)}" />
+          <input inputmode="numeric" placeholder="Reps" value="${esc(s.reps)}" />
+        `;
+        const [w,r] = row.querySelectorAll("input");
+        w.oninput = (e)=>{ s.weight = e.target.value; autosaveSoon(); updateHints(); };
+        r.oninput = (e)=>{ s.reps = e.target.value; autosaveSoon(); updateHints(); };
+        setsWrap.appendChild(row);
+      });
+    } else {
+      // L/R rows
+      const isPerLeg = setsData?.[0]?.perLeg;
+      setsData.forEach((s,i)=>{
+        const row = document.createElement("div");
+        row.className = "setrow two";
+        row.innerHTML = `
+          <label>Set ${i+1}</label>
+          <input inputmode="decimal" placeholder="${isPerLeg ? "Left wt" : "L wt"}" value="${esc(s.left.weight)}" />
+          <input inputmode="numeric"  placeholder="${isPerLeg ? "Left reps" : "L reps"}" value="${esc(s.left.reps)}" />
+          <input inputmode="decimal" placeholder="${isPerLeg ? "Right wt" : "R wt"}" value="${esc(s.right.weight)}" />
+          <input inputmode="numeric"  placeholder="${isPerLeg ? "Right reps" : "R reps"}" value="${esc(s.right.reps)}" />
+        `;
+        const inputs = row.querySelectorAll("input");
+        inputs[0].oninput = (e)=>{ s.left.weight = e.target.value; autosaveSoon(); updateHints(); };
+        inputs[1].oninput = (e)=>{ s.left.reps   = e.target.value; autosaveSoon(); updateHints(); };
+        inputs[2].oninput = (e)=>{ s.right.weight= e.target.value; autosaveSoon(); updateHints(); };
+        inputs[3].oninput = (e)=>{ s.right.reps  = e.target.value; autosaveSoon(); updateHints(); };
+        setsWrap.appendChild(row);
+      });
+    }
+
+    card.appendChild(setsWrap);
+
+    // optional notes per exercise
+    const details = document.createElement("details");
+    details.innerHTML = `
+      <summary>Notes</summary>
+      <div style="margin-top:8px;">
+        <input id="note_${exKey}" placeholder="Quick note (form, pain, PR, etc.)" />
+      </div>
+    `;
+    const noteKey = `note_${exKey}`;
+    if(!log.exercises[noteKey]) log.exercises[noteKey] = "";
+    const noteInput = details.querySelector("input");
+    noteInput.value = log.exercises[noteKey];
+    noteInput.oninput = (e)=>{ log.exercises[noteKey] = e.target.value; autosaveSoon(); };
+
+    card.appendChild(details);
+
+    workoutEl.appendChild(card);
+  });
+
+  save(); // ensure init persists
+  updateHints();
+}
+
+function esc(v){ return (v ?? "").toString().replace(/"/g,"&quot;"); }
+
+/** -------------------------------
+ *  Progression hints
+ *  ------------------------------*/
+function parseNum(x){
+  if(x===null||x===undefined) return null;
+  const s = String(x).trim().replace(/,/g,".");
+  if(!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+function parseIntSafe(x){
+  const n = parseNum(x);
+  return n===null ? null : Math.trunc(n);
+}
+function repRangeMax(repRangeStr){
+  // grabs the last number in something like "4 × 8–12" or "3 × 12–15"
+  const m = repRangeStr.match(/(\d+)\D*(\d+)\s*[–-]\s*(\d+)/);
+  if(m) return parseInt(m[3],10);
+  const m2 = repRangeStr.match(/(\d+)\s*[–-]\s*(\d+)/);
+  if(m2) return parseInt(m2[2],10);
+  return null;
+}
+function updateHints(){
+  const day = DAYS.find(d=>d.id===state.activeDayId);
+  const log = getDayLog(day.id);
+
+  day.exercises.forEach((exercise, idx)=>{
+    const exKey = `${idx}_${exercise.name}`;
+    const hintEl = document.getElementById(`hint_${exKey}`);
+    if(!hintEl) return;
+
+    const setsData = log.exercises[exKey];
+    const maxR = repRangeMax(exercise.repRange);
+
+    // if not enough info, no hint
+    if(!maxR){ hintEl.textContent = ""; return; }
+
+    let allAtTop = true;
+    let anyFilled = false;
+
+    if(exercise.type === "standard"){
+      for(const s of setsData){
+        const reps = parseIntSafe(s.reps);
+        if(reps !== null) anyFilled = true;
+        if(reps === null || reps < maxR) allAtTop = false;
+      }
+    } else {
+      // for L/R: progression based on LEFT (bias rule)
+      for(const s of setsData){
+        const repsL = parseIntSafe(s.left.reps);
+        if(repsL !== null) anyFilled = true;
+        if(repsL === null || repsL < maxR) allAtTop = false;
+      }
+    }
+
+    if(!anyFilled){
+      hintEl.textContent = "";
+      return;
+    }
+    if(allAtTop){
+      hintEl.innerHTML = `<span class="ok">Top reps hit → add weight next time</span>`;
+    } else {
+      hintEl.innerHTML = `<span class="warn">Build reps to ${maxR} on all sets</span>`;
+    }
+  });
+}
+
+/** -------------------------------
+ *  Buttons: save / clear / export / import
+ *  ------------------------------*/
+document.getElementById("saveBtn").onclick = save;
+
+document.getElementById("clearDayBtn").onclick = ()=>{
+  const day = DAYS.find(d=>d.id===state.activeDayId);
+  if(!confirm(`Clear all entries for ${day.name}?`)) return;
+  const log = getDayLog(day.id);
+  log.date = todayISO();
+  log.exercises = {};
+  autosaveSoon();
+  render();
+};
+
+const ioDialog = document.getElementById("ioDialog");
+const ioTitle = document.getElementById("ioTitle");
+const ioText = document.getElementById("ioText");
+const ioArea = document.getElementById("ioArea");
+const copyBtn = document.getElementById("copyBtn");
+const applyImportBtn = document.getElementById("applyImportBtn");
+
+document.getElementById("exportBtn").onclick = ()=>{
+  ioTitle.textContent = "Export Data";
+  ioText.textContent = "Copy this backup text and save it in Notes, email it to yourself, etc.";
+  ioArea.value = JSON.stringify(state, null, 2);
+  applyImportBtn.style.display = "none";
+  ioDialog.showModal();
+};
+
+document.getElementById("importBtn").onclick = ()=>{
+  ioTitle.textContent = "Import Data";
+  ioText.textContent = "Paste an export JSON here, then tap Apply Import. This overwrites current data.";
+  ioArea.value = "";
+  applyImportBtn.style.display = "inline-block";
+  ioDialog.showModal();
+};
+
+copyBtn.onclick = async ()=>{
+  try{
+    await navigator.clipboard.writeText(ioArea.value);
+    copyBtn.textContent = "Copied ✓";
+    setTimeout(()=>copyBtn.textContent="Copy", 900);
+  }catch(e){
+    alert("Copy failed. Select all and copy manually.");
+  }
+};
+
+applyImportBtn.onclick = ()=>{
+  try{
+    const incoming = JSON.parse(ioArea.value);
+    if(!incoming || typeof incoming !== "object") throw new Error("Invalid JSON");
+    localStorage.setItem(KEY, JSON.stringify(incoming));
+    location.reload();
+  }catch(e){
+    alert("Import failed. Make sure you pasted the full export JSON.");
+  }
+};
+
+/** -------------------------------
+ *  PWA (service worker)
+ *  ------------------------------*/
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", async () => {
+    try { await navigator.serviceWorker.register("./sw.js"); } catch (e) {}
+  });
+}
+
+render();
+</script>
+</body>
+</html>
